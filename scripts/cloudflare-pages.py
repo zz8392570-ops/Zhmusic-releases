@@ -106,14 +106,23 @@ def project_base(account, token):
 
 
 def remote_digest(url, max_size):
-    request = urllib.request.Request(url, headers={'Cache-Control': 'no-cache'})
+    request = urllib.request.Request(url, headers={
+        'Cache-Control': 'no-cache', 'User-Agent': 'ZhMusicReleaseMirror/1.0'})
     digest, size = hashlib.sha256(), 0
-    with urllib.request.urlopen(request, timeout=45) as response:
-        while chunk := response.read(256 * 1024):
-            size += len(chunk)
-            if size > max_size:
-                raise ValueError('Deployed response exceeds expected size')
-            digest.update(chunk)
+    try:
+        with urllib.request.urlopen(request, timeout=45) as response:
+            while chunk := response.read(256 * 1024):
+                size += len(chunk)
+                if size > max_size:
+                    raise ValueError('Deployed response exceeds expected size')
+                digest.update(chunk)
+    except urllib.error.HTTPError as error:
+        if error.code == 403:
+            # This request has no credentials; its public error page is safe to diagnose.
+            snippet = ' '.join(error.read(1200).decode('utf-8', errors='replace').split())[:800]
+            raise RuntimeError(f'Public download HTTP 403; server={error.headers.get("Server")}; '
+                               f'mitigated={error.headers.get("cf-mitigated")}; response={snippet}') from None
+        raise
     return digest.hexdigest()
 
 
