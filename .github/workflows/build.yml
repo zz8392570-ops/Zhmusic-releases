@@ -2,18 +2,6 @@ name: Build ZhMusic
 
 on:
   workflow_dispatch:
-    inputs:
-      source_repository:
-        description: '选择源码仓库（仅上传当前版本快照）'
-        type: choice
-        options:
-          - zz8392570-ops/Zhmusic
-          - zz8392570-ops/Zhmusic-test
-        default: zz8392570-ops/Zhmusic
-      finalize_migration:
-        description: '成功发布后，将两个源码仓库设为私有并停用旧自动流程'
-        type: boolean
-        default: true
 
 concurrency:
   group: zhmusic-publication
@@ -28,18 +16,15 @@ jobs:
     timeout-minutes: 120
     env:
       GH_TOKEN: ${{ secrets.ZHMUSIC_BUILD_TOKEN }}
-      SOURCE_REPOSITORY: ${{ inputs.source_repository }}
+      SOURCE_REPOSITORY: zz8392570-ops/Zhmusic
       PYTHONDONTWRITEBYTECODE: '1'
     steps:
-      - name: Verify token and repository choices
+      - name: Verify token and private source
         run: |
           python3 - <<'PY'
           import json, os, subprocess
           if not os.environ.get('GH_TOKEN'):
               raise SystemExit('请在本仓库 Actions Secrets 添加 ZHMUSIC_BUILD_TOKEN。')
-          allowed = {'zz8392570-ops/Zhmusic', 'zz8392570-ops/Zhmusic-test'}
-          if os.environ['SOURCE_REPOSITORY'] not in allowed:
-              raise SystemExit('不支持的源码仓库。')
           result = subprocess.run(['gh', 'api', '--include', 'user'], capture_output=True, text=True, check=True)
           raw = next((line.split(':', 1)[1] for line in result.stdout.splitlines()
                       if line.lower().startswith('x-oauth-scopes:')), '')
@@ -49,13 +34,16 @@ jobs:
           owner = json.loads(subprocess.check_output(['gh', 'api', 'user']))['login']
           if owner.lower() != 'zz8392570-ops':
               raise SystemExit('Token 必须属于 zz8392570-ops。')
+          source = json.loads(subprocess.check_output(['gh', 'api', 'repos/' + os.environ['SOURCE_REPOSITORY']]))
+          if not source['private']:
+              raise SystemExit('长期源码仓库必须保持私有。')
           print('GitHub 身份和必要权限已验证；未输出密钥内容。')
           PY
 
       - name: Check out private source
         uses: actions/checkout@v7
         with:
-          repository: ${{ inputs.source_repository }}
+          repository: ${{ env.SOURCE_REPOSITORY }}
           ref: main
           token: ${{ secrets.ZHMUSIC_BUILD_TOKEN }}
           persist-credentials: false
@@ -68,26 +56,6 @@ jobs:
         run: |
           python3 -u source/scripts/temporary-public-build.py \
             --publish-repo "$GITHUB_REPOSITORY" --timeout-minutes 90 --execute
-
-      - name: Complete source repository migration
-        if: ${{ success() && inputs.finalize_migration }}
-        run: |
-          python3 - <<'PY'
-          import json, subprocess
-          repos = ['zz8392570-ops/Zhmusic', 'zz8392570-ops/Zhmusic-test']
-          for repo in repos:
-              result = subprocess.check_output(['gh', 'api', '--method', 'PATCH', 'repos/' + repo, '-F', 'private=true'])
-              if not json.loads(result)['private']:
-                  raise SystemExit('源码仓库私有化未完成：' + repo)
-              # Checks still run inside each temporary build. Keep the original
-              # production IPA workflow manual, as requested by the owner.
-              workflows = ['quality.yml']
-              if repo.endswith('/Zhmusic-test'):
-                  workflows.append('build-ios.yml')
-              for workflow in workflows:
-                  subprocess.run(['gh', 'api', '--method', 'PUT', f'repos/{repo}/actions/workflows/{workflow}/disable'], check=True)
-              print(repo + ' 已设为私有，原自动流程已停用。')
-          PY
 
       - name: Retry cleanup of recorded temporary repository
         if: ${{ always() }}
