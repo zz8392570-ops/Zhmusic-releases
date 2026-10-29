@@ -124,9 +124,10 @@ def verify_deployment(base, files):
             for relative, path in files.items():
                 expected = hashlib.sha256(path.read_bytes()).hexdigest()
                 if remote_digest(f'{base}/{relative}?verify={time.time_ns()}', path.stat().st_size) != expected:
-                    raise ValueError('Deployed content does not match published files')
+                    raise ValueError(f'Deployed content differs: {relative}')
             return
-        except (urllib.error.URLError, TimeoutError, ValueError):
+        except (urllib.error.URLError, TimeoutError, ValueError) as error:
+            print(f'Public verification attempt {attempt + 1}: {error}', flush=True)
             if attempt == 11:
                 raise RuntimeError('Upload finished but public download verification failed; retry Sync Cloudflare Pages') from None
             time.sleep(10)
