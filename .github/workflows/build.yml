@@ -11,6 +11,13 @@ permissions:
   contents: read
 
 jobs:
+  cloudflare:
+    needs: build
+    uses: ./.github/workflows/cloudflare.yml
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
