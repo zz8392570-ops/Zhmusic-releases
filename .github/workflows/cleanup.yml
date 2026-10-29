@@ -1,0 +1,29 @@
+name: Cleanup expired temporary builds
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17,47 * * * *'
+
+# Separate from publication: a cleanup run must never replace a queued build.
+concurrency:
+  group: zhmusic-orphan-cleanup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.ZHMUSIC_BUILD_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Check expired marked repositories
+        run: |
+          python3 scripts/check-cleanup-stale.py
+          python3 scripts/cleanup-stale.py

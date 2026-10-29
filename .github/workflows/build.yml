@@ -49,8 +49,16 @@ jobs:
           persist-credentials: false
           path: source
 
+      - name: Check out publication tools
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          path: publication
+
       - name: Check orchestration offline
-        run: python3 source/scripts/check-temporary-public-build.py
+        run: |
+          python3 source/scripts/check-temporary-public-build.py
+          python3 publication/scripts/check_private_diagnostics.py
 
       - name: Build snapshot, download IPA, delete temporary repository and publish
         run: |
@@ -73,6 +81,13 @@ jobs:
                   if record.get('creation_attempted') and not record.get('deleted_at'):
                       build.cleanup(state)
           PY
+
+      - name: Save failed build diagnostics privately
+        if: ${{ always() }}
+        run: |
+          if [ -f publication/scripts/save_private_diagnostics.py ]; then
+            python3 publication/scripts/save_private_diagnostics.py source/.temporary-public-builds
+          fi
 
       - name: Preserve downloaded packages and recovery records
         if: ${{ always() }}
