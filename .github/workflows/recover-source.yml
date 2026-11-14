@@ -1,0 +1,31 @@
+name: Recover SideStore source
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: zhmusic-publication
+  cancel-in-progress: false
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify source and latest release
+        run: |
+          python3 - <<'PY'
+          import json, subprocess
+          source = json.load(open('source-recovery/source.json'))
+          apps = source['apps']
+          assert len(apps) == 1 and apps[0]['bundleIdentifier'] == 'com.zz8392570.zhmusic'
+          url = apps[0]['versions'][0]['downloadURL']
+          latest = json.loads(subprocess.check_output(['gh', 'release', 'view', '--json', 'tagName']))['tagName']
+          expected = f'https://github.com/{__import__("os").environ["GITHUB_REPOSITORY"]}/releases/download/{latest}/ZhMusic-unsigned.ipa'
+          assert url == expected, 'Latest release changed; do not replace the source with stale data'
+          PY
+      - name: Restore source asset
+        run: |
+          cp source-recovery/source.json source.json
+          gh release upload sidestore source.json --clobber
