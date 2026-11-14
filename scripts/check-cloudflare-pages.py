@@ -20,12 +20,29 @@ BASE = 'https://zhmusic-download.pages.dev'
 class Checks(unittest.TestCase):
     def setUp(self):
         self.source = {'identifier': 'keep-original-identifier', 'iconURL': 'old-icon', 'apps': [{
-            'bundleIdentifier': 'com.music.player.gyc', 'iconURL': 'old-icon', 'versions': [{
+            'bundleIdentifier': mirror.APP_ID, 'iconURL': 'old-icon', 'versions': [{
                 'version': '2.0.1002', 'buildVersion': '1002.1', 'size': 200,
                 'downloadURL': f'https://github.com/{mirror.REPO}/releases/download/{TAG}/{mirror.IPA}'}]}]}
 
     def test_valid_metadata(self):
         self.assertEqual(mirror.package_metadata(self.source)[0], TAG)
+
+    def test_legacy_entry_is_preserved_without_redirecting_it_to_new_package(self):
+        legacy = {'bundleIdentifier': 'com.music.player.gyc', 'versions': [{'downloadURL': 'https://example.test/old.ipa'}]}
+        self.source['apps'].insert(0, legacy)
+        self.assertEqual(mirror.package_metadata(self.source)[0], TAG)
+        result = mirror.rewrite_source(self.source, BASE, TAG)
+        self.assertEqual(result['apps'][0], legacy)
+        self.assertEqual(result['apps'][1]['versions'][0]['downloadURL'], f'{BASE}/releases/{TAG}/{mirror.IPA}')
+
+    def test_missing_or_duplicate_new_identity_is_rejected(self):
+        app = self.source['apps'][0]
+        self.source['apps'] = []
+        with self.assertRaises(ValueError):
+            mirror.package_metadata(self.source)
+        self.source['apps'] = [app, copy.deepcopy(app)]
+        with self.assertRaises(ValueError):
+            mirror.package_metadata(self.source)
 
     def test_reject_untrusted_downloads(self):
         version = self.source['apps'][0]['versions'][0]
@@ -60,7 +77,7 @@ class Checks(unittest.TestCase):
             path = Path(directory) / mirror.IPA
             with zipfile.ZipFile(path, 'w') as archive:
                 archive.writestr('Payload/ZhMusic.app/Info.plist', plistlib.dumps({
-                    'CFBundleIdentifier': 'com.music.player.gyc',
+                    'CFBundleIdentifier': mirror.APP_ID,
                     'CFBundleShortVersionString': '2.0.1002', 'CFBundleVersion': '1002.1'}))
             version = dict(self.source['apps'][0]['versions'][0], size=path.stat().st_size)
             asset = {'size': version['size'], 'digest': 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest()}

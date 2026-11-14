@@ -20,17 +20,25 @@ PROJECT = 'zhmusic-download'
 IPA = 'ZhMusic-unsigned.ipa'
 LIMIT = 25 * 1024 * 1024
 WRANGLER = '4.155.0'
+APP_ID = 'com.zz8392570.zhmusic'
 
 
 def command(*args):
     return subprocess.check_output(args, text=True, timeout=300)
 
 
-def package_metadata(source):
+def current_app(source):
     apps = source.get('apps', [])
-    if len(apps) != 1 or apps[0].get('bundleIdentifier') != 'com.music.player.gyc':
+    if not isinstance(apps, list) or any(not isinstance(app, dict) for app in apps):
         raise ValueError('Unexpected SideStore application')
-    versions = apps[0].get('versions', [])
+    matches = [app for app in apps if app.get('bundleIdentifier') == APP_ID]
+    if len(matches) != 1:
+        raise ValueError('Unexpected SideStore application')
+    return matches[0]
+
+
+def package_metadata(source):
+    versions = current_app(source).get('versions', [])
     if len(versions) != 1:
         raise ValueError('Expected exactly one published version')
     version = versions[0]
@@ -59,7 +67,7 @@ def verify_package(path, version, asset):
         if len(names) != 1:
             raise ValueError('Expected one main app')
         info = plistlib.loads(archive.read(names[0]))
-    if (info.get('CFBundleIdentifier') != 'com.music.player.gyc'
+    if (info.get('CFBundleIdentifier') != APP_ID
             or info.get('CFBundleShortVersionString') != version.get('version')
             or info.get('CFBundleVersion') != version.get('buildVersion')):
         raise ValueError('IPA version does not match published SideStore source')
@@ -70,7 +78,7 @@ def rewrite_source(source, base, tag):
     result = copy.deepcopy(source)
     result.update(iconURL=base + '/icon.png', website=base,
                   description='按需构建的 ZhMusic 安装包与 SideStore 更新源。')
-    app = result['apps'][0]
+    app = current_app(result)
     app['iconURL'] = base + '/icon.png'
     app['versions'][0]['downloadURL'] = f'{base}/releases/{tag}/{IPA}'
     return result
@@ -170,7 +178,7 @@ def main():
         (output / 'icon.png').write_bytes(icon)
         rewritten = rewrite_source(source, base, tag)
         (output / 'source.json').write_text(json.dumps(rewritten, ensure_ascii=False, indent=2) + '\n')
-        download = html.escape(rewritten['apps'][0]['versions'][0]['downloadURL'], quote=True)
+        download = html.escape(current_app(rewritten)['versions'][0]['downloadURL'], quote=True)
         (output / 'index.html').write_text(
             '<!doctype html><html lang="zh-CN"><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
