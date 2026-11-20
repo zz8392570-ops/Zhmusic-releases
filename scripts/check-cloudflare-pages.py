@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import importlib.util
+import json
 from pathlib import Path
 import plistlib
 import tempfile
@@ -14,6 +15,8 @@ spec = importlib.util.spec_from_file_location('mirror', Path(__file__).with_name
 mirror = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mirror)
 TAG = 'build-20261029100742-901e70cbb3af'
+PAST_TAG = 'build-20261028100742-901e70cbb3af'
+OLDER_TAG = 'build-20261027100742-901e70cbb3af'
 BASE = 'https://zhmusic-download.pages.dev'
 
 
@@ -86,6 +89,47 @@ class Checks(unittest.TestCase):
                 mirror.verify_package(path, dict(version, buildVersion='1001.1'), asset)
             with self.assertRaises(ValueError):
                 mirror.verify_package(path, version, dict(asset, digest='sha256:bad'))
+
+    def test_previous_assets_require_a_published_build_with_an_ipa(self):
+        asset = {'name': mirror.IPA, 'size': 123, 'digest': 'sha256:fixture'}
+        releases = [
+            {'tag_name': TAG, 'assets': [asset]},
+            {'tag_name': PAST_TAG, 'assets': [asset]},
+            {'tag_name': OLDER_TAG, 'assets': [asset], 'draft': True},
+            {'tag_name': 'sidestore', 'assets': [asset]},
+            {'tag_name': 'build/../../foo', 'assets': [asset]},
+        ]
+        with patch.object(mirror, 'command', return_value='\n'.join(map(json.dumps, releases))):
+            self.assertEqual(mirror.previous_release_assets(TAG), {PAST_TAG: asset})
+
+    def test_previous_ipa_keeps_its_exact_link_and_old_entries_redirect_to_their_own_release(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / 'site'
+            existing = root / mirror.IPA
+            with zipfile.ZipFile(existing, 'w') as archive:
+                archive.writestr('Payload/ZhMusic.app/Info.plist', plistlib.dumps({
+                    'CFBundleIdentifier': mirror.APP_ID,
+                    'CFBundleShortVersionString': '2.0.1001', 'CFBundleVersion': '1001.1'}))
+            blob = existing.read_bytes()
+            asset = {'size': len(blob), 'digest': 'sha256:' + hashlib.sha256(blob).hexdigest()}
+            releases = {PAST_TAG: asset, OLDER_TAG: asset}
+            with patch.object(mirror, 'PREVIOUS_MIRRORS', 1), patch.object(mirror, 'download_package', return_value=existing):
+                retained = mirror.retain_previous_packages(output, root, releases)
+            self.assertEqual(retained[PAST_TAG].relative_to(output).as_posix(), mirror.mirrored_path(PAST_TAG))
+            self.assertEqual(retained[PAST_TAG].read_bytes(), blob)
+            self.assertEqual(mirror.legacy_package_redirects(releases, retained), {
+                mirror.mirrored_path(OLDER_TAG): f'https://github.com/{mirror.REPO}/releases/download/{OLDER_TAG}/{mirror.IPA}'})
+            self.assertEqual(len(mirror.current_app(mirror.rewrite_source(self.source, BASE, TAG))['versions']), 1)
+
+    def test_public_redirect_requires_a_match_to_the_release_url(self):
+        url = f'{BASE}/{mirror.mirrored_path(OLDER_TAG)}'
+        target = f'https://github.com/{mirror.REPO}/releases/download/{OLDER_TAG}/{mirror.IPA}'
+        with patch.object(mirror.urllib.request, 'build_opener') as opener:
+            opener.return_value.open.side_effect = urllib.error.HTTPError(url, 302, 'Found', {'Location': target}, None)
+            mirror.verify_public_redirect(url, target)
+            with self.assertRaises(ValueError):
+                mirror.verify_public_redirect(url, target + '.wrong')
 
     def test_existing_project_not_recreated(self):
         with patch.object(mirror, 'cf_api', return_value={'production_branch': 'main', 'subdomain': 'example.pages.dev'}) as api:
