@@ -130,6 +130,10 @@ class Checks(unittest.TestCase):
             mirror.verify_public_redirect(url, target)
             with self.assertRaises(ValueError):
                 mirror.verify_public_redirect(url, target + '.wrong')
+            opener.return_value.open.side_effect = urllib.error.HTTPError(url, 302, 'Found', {'Location': target + '?verify=123'}, None)
+            mirror.verify_public_redirect(url + '?verify=123', target)
+            with self.assertRaises(ValueError):
+                mirror.verify_public_redirect(url + '?verify=456', target)
 
     def test_existing_project_not_recreated(self):
         with patch.object(mirror, 'cf_api', return_value={'production_branch': 'main', 'subdomain': 'example.pages.dev'}) as api:

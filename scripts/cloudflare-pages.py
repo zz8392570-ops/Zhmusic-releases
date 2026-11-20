@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 
@@ -210,8 +211,11 @@ def verify_public_redirect(url, target):
         with opener.open(verification_request(url), timeout=30):
             raise ValueError('Historical IPA URL did not redirect')
     except urllib.error.HTTPError as error:
-        if error.code != 302 or error.headers.get('Location') != target:
-            raise ValueError(f'Historical IPA redirect did not match (HTTP {error.code})') from None
+        location = urllib.parse.urlsplit(error.headers.get('Location', ''))
+        destination = location._replace(query='').geturl()
+        query = urllib.parse.urlsplit(url).query
+        if error.code != 302 or destination != target or location.query not in ('', query):
+            raise ValueError(f'Historical IPA redirect did not match (HTTP {error.code}, destination={destination})') from None
 
 
 def verify_deployment(base, files, redirect=None):
