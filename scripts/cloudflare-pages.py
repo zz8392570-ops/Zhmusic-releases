@@ -175,12 +175,15 @@ def project_base(account, token):
     return 'https://' + host
 
 
-def remote_digest(url, max_size):
-    request = urllib.request.Request(url, headers={
+def verification_request(url):
+    return urllib.request.Request(url, headers={
         'Cache-Control': 'no-cache', 'User-Agent': 'ZhMusicReleaseMirror/1.0'})
+
+
+def remote_digest(url, max_size):
     digest, size = hashlib.sha256(), 0
     try:
-        with urllib.request.urlopen(request, timeout=45) as response:
+        with urllib.request.urlopen(verification_request(url), timeout=45) as response:
             while chunk := response.read(256 * 1024):
                 size += len(chunk)
                 if size > max_size:
@@ -204,7 +207,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 def verify_public_redirect(url, target):
     opener = urllib.request.build_opener(NoRedirect)
     try:
-        with opener.open(url, timeout=30):
+        with opener.open(verification_request(url), timeout=30):
             raise ValueError('Historical IPA URL did not redirect')
     except urllib.error.HTTPError as error:
         if error.code != 302 or error.headers.get('Location') != target:
@@ -221,7 +224,7 @@ def verify_deployment(base, files, redirect=None):
                     raise ValueError(f'Deployed content differs: {relative}')
             if redirect:
                 relative, target = redirect
-                verify_public_redirect(f'{base}/{relative}', target)
+                verify_public_redirect(f'{base}/{relative}?verify={time.time_ns()}', target)
             return
         except (urllib.error.URLError, TimeoutError, ValueError) as error:
             print(f'Public verification attempt {attempt + 1}: {error}', flush=True)
