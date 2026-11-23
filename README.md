@@ -12,7 +12,7 @@ https://github.com/zz8392570-ops/Zhmusic-releases/releases/download/sidestore/so
 
 ## 手机发起打包
 
-打开本仓库 **Actions → Build ZhMusic → Run workflow**，直接运行即可，固定使用私有源码仓库 `Zhmusic`。
+打开本仓库 **Actions → Build ZhMusic → Run workflow**，在 `source_sha` 填写私有源码仓库 `Zhmusic` 的 `main` 上要构建的完整 40 位提交 SHA。构建摘要会显示该 SHA。
 此工作流使用 Ubuntu 调度临时公开仓库中的 macOS 构建，下载并校验 IPA 后删除临时仓库，
 最后把安装包和更新源发布到本仓库。只上传当前已提交版本，不上传 Git 历史。
 排队和构建期间源码快照仍可被复制；删除仓库不能收回其他人已取得的副本。
