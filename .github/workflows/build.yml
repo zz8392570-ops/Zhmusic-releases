@@ -2,6 +2,11 @@ name: Build ZhMusic
 
 on:
   workflow_dispatch:
+    inputs:
+      source_sha:
+        description: ZhMusic main commit SHA
+        required: true
+        type: string
 
 concurrency:
   group: zhmusic-publication
@@ -24,12 +29,13 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.ZHMUSIC_BUILD_TOKEN }}
       SOURCE_REPOSITORY: zz8392570-ops/Zhmusic
+      SOURCE_SHA: ${{ inputs.source_sha }}
       PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - name: Verify token and private source
         run: |
           python3 - <<'PY'
-          import json, os, subprocess
+          import json, os, re, subprocess
           if not os.environ.get('GH_TOKEN'):
               raise SystemExit('请在本仓库 Actions Secrets 添加 ZHMUSIC_BUILD_TOKEN。')
           result = subprocess.run(['gh', 'api', '--include', 'user'], capture_output=True, text=True, check=True)
@@ -44,14 +50,30 @@ jobs:
           source = json.loads(subprocess.check_output(['gh', 'api', 'repos/' + os.environ['SOURCE_REPOSITORY']]))
           if not source['private']:
               raise SystemExit('长期源码仓库必须保持私有。')
-          print('GitHub 身份和必要权限已验证；未输出密钥内容。')
+          sha = os.environ['SOURCE_SHA']
+          if not re.fullmatch(r'[0-9a-f]{40}', sha):
+              raise SystemExit('请提供完整的 40 位源码提交 SHA。')
+          def status(base, head):
+              return subprocess.check_output(['gh', 'api',
+                  f"repos/{os.environ['SOURCE_REPOSITORY']}/compare/{base}...{head}",
+                  '--jq', '.status'], text=True).strip()
+          if status(sha, 'main') not in ('ahead', 'identical'):
+              raise SystemExit('源码提交必须属于 main 历史。')
+          release = subprocess.check_output(['gh', 'api',
+              f"repos/{os.environ['GITHUB_REPOSITORY']}/releases?per_page=100",
+              '--jq', 'first(.[] | select(.draft == false and .prerelease == false and (.tag_name | startswith("build-")))) | .body // ""'],
+              text=True)
+          previous = re.search(r'^构建提交：([0-9a-f]{40})$', release, re.M)
+          if previous and status(previous[1], sha) not in ('ahead', 'identical'):
+              raise SystemExit('提交早于已发布的版本。')
+          print('已验证源码提交', sha)
           PY
 
       - name: Check out private source
         uses: actions/checkout@v7
         with:
           repository: ${{ env.SOURCE_REPOSITORY }}
-          ref: main
+          ref: ${{ inputs.source_sha }}
           token: ${{ secrets.ZHMUSIC_BUILD_TOKEN }}
           persist-credentials: false
           path: source
@@ -69,6 +91,7 @@ jobs:
 
       - name: Build snapshot, download IPA, delete temporary repository and publish
         run: |
+          test "$(git -C source rev-parse HEAD)" = "$SOURCE_SHA"
           python3 -u source/scripts/temporary-public-build.py \
             --publish-repo "$GITHUB_REPOSITORY" --timeout-minutes 90 --execute
 
@@ -114,6 +137,7 @@ jobs:
         run: |
           {
             echo '### ZhMusic 下载'
+            echo "- 源码提交 $SOURCE_SHA"
             echo
             echo "- IPA：https://github.com/$GITHUB_REPOSITORY/releases/latest/download/ZhMusic-unsigned.ipa"
             echo "- SideStore：https://github.com/$GITHUB_REPOSITORY/releases/download/sidestore/source.json"
